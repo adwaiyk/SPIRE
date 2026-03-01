@@ -34,6 +34,7 @@ venv/
 env/
 .env
 backend/.venv/
+.venv_wsl/
 
 # Distribution / packaging
 build/

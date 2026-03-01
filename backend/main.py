@@ -1,100 +1,110 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from fastapi.staticfiles import StaticFiles # <-- NEW IMPORT
 import numpy as np
+import pickle
 import os
+import hashlib
 
-# Import our custom Data Structures & AI Models
-from core.bloom_filter import ChemicalBloomFilter
-from core.vp_tree import VPTree
-from data.pdb_parser import AlphaFoldParser
+from core.geo_hash import GeometricHashTable
 from ml.gnn_ranker import AIRanker
+from data.pdb_parser import AlphaFoldParser
 
-app = FastAPI(title="SPIRE Engine API", version="2.0")
+app = FastAPI(title="SPIRE Engine API", version="4.0")
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"], # Allows the Windows Next.js frontend to talk to the WSL backend
+    allow_origins=["*"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-print("--- INITIALIZING SPIRE ENGINE v2.0 ---")
+# <-- NEW: Serve the local PDB files directly to the frontend! -->
+os.makedirs("data/raw", exist_ok=True)
+app.mount("/static", StaticFiles(directory="data/raw"), name="static")
 
-# 1. Gatekeeper: Unit 6 Bloom Filter
-pocket_filter = ChemicalBloomFilter(expected_items=100, false_positive_rate=0.01)
-pocket_filter.add("HAS_SULPHUR")
+print("=========================================")
+print("      BOOTING SPIRE DATABASE ENGINE      ")
+print("=========================================")
 
-# 2. Boot up AI Models
-print("Booting up AlphaFold Pipeline & PyTorch GNN...")
-af_parser = AlphaFoldParser()
+index_path = "data/index/spire_master.pkl"
+if not os.path.exists(index_path):
+    raise FileNotFoundError("Database index not found! Run scripts/build_index.py first.")
+
+with open(index_path, "rb") as f:
+    db_package = pickle.load(f)
+
+vp_tree = db_package["vp_tree"]
+pocket_filter = db_package["bloom_filter"]
+pocket_coords_db = db_package["raw_coords"]
+
+geo_hash = GeometricHashTable(bin_size=20.0)
+for pid, coords in pocket_coords_db.items():
+    centered = coords - np.mean(coords, axis=0)
+    cov_matrix = np.cov(centered, rowvar=False)
+    eigenvalues, _ = np.linalg.eigh(cov_matrix)
+    vec = np.sort(eigenvalues)[::-1]
+    geo_hash.insert(pid, vec)
+
 ai_ranker = AIRanker()
+af_parser = AlphaFoldParser() # Needed to process user uploads
 
-# 3. Ingest Real Biological Data
-# P04637: p53 Tumor Suppressor | P02144: Myoglobin | P00734: Prothrombin
-db_ids = ["P04637", "P02144", "P00734"]
-db_points = []
-pocket_coords_db = {} # We must store the raw atoms so the GNN can graph them later
+print(f"--- SPIRE ONLINE: {db_package['indexed_count']} Pockets Indexed ---")
+print("=========================================")
 
-# Step 6 Flex: AlphaMissense Mock Database
-# DeepMind flagged p53 (P04637) as highly sensitive to mutation.
-alphamissense_db = {
-    "P04637": True,  # HIGHLY CONSERVED - Trigger Warning!
-    "P02144": False,
-    "P00734": False
-}
-
-for pid in db_ids:
-    raw_file = af_parser.fetch_alphafold_structure(pid)
-    if not raw_file:
-        continue
-        
-    clean_file = af_parser.filter_by_plddt(raw_file, pid)
-    coords = af_parser.run_fpocket(clean_file)
-    vec = af_parser.generate_vp_feature_vector(coords)
-    
-    db_points.append(vec)
-    pocket_coords_db[pid] = coords
-    print(f" -> {pid} Indexed. PCA Vector: [{vec[0]:.1f}, {vec[1]:.1f}, {vec[2]:.1f}]")
-
-# 4. Build Precision Navigator: Unit 5 VP-Tree
-vp_tree = VPTree(np.array(db_points), db_ids)
-print("--- SPIRE ENGINE ONLINE ---")
-
-# --- API ROUTES ---
-class SearchQuery(BaseModel):
-    required_property: str
-    query_vector: list[float] 
-
-@app.post("/search")
-def run_spire_pipeline(query: SearchQuery):
-    # Step 2 Pipeline check: O(1) Chemical Rejection
-    if not pocket_filter.check(query.required_property):
+@app.post("/upload_search")
+async def search_uploaded_pdb(
+    file: UploadFile = File(...),
+    required_property: str = Form(...)
+):
+    # Step 1: Bloom Filter - O(1) Chemical Rejection
+    if not pocket_filter.check(required_property):
         return {"match_found": False, "reason": "Failed Bloom Filter chemical check."}
-    
-    # Step 4 Pipeline check: O(log N) Spatial Nearest Neighbor Search
-    query_np = np.array(query.query_vector)
+
+    # Save the uploaded file temporarily
+    temp_path = f"data/raw/temp_query_{file.filename}"
+    with open(temp_path, "wb") as buffer:
+        buffer.write(await file.read())
+
+    # Extract geometry from the uploaded file
+    try:
+        # Assuming the user uploads a pre-cut pocket. If it's a whole protein, 
+        # af_parser.run_fpocket(temp_path) would be used here instead.
+        raw_atoms = af_parser._extract_coords(temp_path, "query")
+        query_np = af_parser.generate_vp_feature_vector(raw_atoms)
+    except Exception as e:
+        return {"match_found": False, "reason": f"Failed to parse PDB file: {str(e)}"}
+    finally:
+        if os.path.exists(temp_path):
+            os.remove(temp_path)
+
+    # Step 2: Geometric Hashing - O(1) Candidate Identification
+    candidates = geo_hash.get_candidates(query_np)
+    if not candidates:
+        return {"match_found": False, "reason": "Geometric Hashing found zero rotation-invariant candidates for this uploaded topology."}
+
+    # Step 3: VP-Tree - O(log N) Precision Navigator
     best_pocket, distance = vp_tree.search_nearest(query_np)
     
-    if distance > 200.0:
-        return {"match_found": False, "reason": "No structurally similar pocket found."}
-        
-    # Step 5 Pipeline check: PyTorch GNN Ranking
-    candidate_data = [{
-        "id": best_pocket,
-        "coords": pocket_coords_db[best_pocket]
-    }]
-    
-    # Run the graph analysis
+    if best_pocket not in candidates or distance > 150.0:
+        return {"match_found": False, "reason": "No structurally identical pocket found within metric bounds."}
+
+    # Step 4: GNN - AI Judge Ranking
+    candidate_data = [{"id": best_pocket, "coords": pocket_coords_db[best_pocket]}]
     ranked_results = ai_ranker.rank_pockets(candidate_data)
     top_match = ranked_results[0]
     
+    # Step 5: Dynamic AlphaMissense Simulator
+    # In production, this queries the 200GB DeepMind CSV. Here we simulate consistency via hashing.
+    hash_val = int(hashlib.md5(top_match["id"].encode()).hexdigest(), 16)
+    is_hotspot = hash_val % 3 == 0 # ~33% chance to flag as a critical mutation hotspot
+
     return {
         "match_found": True,
         "protein_id": top_match["id"],
         "metric_distance": float(distance),
         "ai_score": float(top_match["ai_binding_score"]),
-        "alphamissense_warning": alphamissense_db.get(top_match["id"], False),
-        "message": f"Successfully matched via VP-Tree. GNN Binding Affinity: {top_match['ai_binding_score']:.2%}"
+        "alphamissense_warning": is_hotspot,
+        "message": f"Pipeline Success. Top Match verified via VP-Tree."
     }

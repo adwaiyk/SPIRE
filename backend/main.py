@@ -8,6 +8,11 @@ import os
 import hashlib
 import glob # <-- NEW IMPORT
 import shutil # <-- NEW IMPORT
+import json
+
+clinical_dict_path = "data/clinical_context.json"
+with open(clinical_dict_path, "r") as f:
+    clinical_context_db = json.load(f)
 
 from core.geo_hash import GeometricHashTable
 from ml.gnn_ranker import AIRanker
@@ -144,6 +149,14 @@ async def search_uploaded_pdb(
     # Dynamic AlphaMissense Simulator
     hash_val = int(hashlib.md5(real_protein_id.encode()).hexdigest(), 16)
     is_hotspot = hash_val % 3 == 0 
+    
+    pharma_data = clinical_context_db.get(real_protein_id, {
+        "protein_name": "Unknown Protein",
+        "primary_tissue": "Unknown",
+        "known_ligands": "None recorded",
+        "clinical_target": "N/A",
+        "side_effects": "Unknown"
+    })
 
     return {
         "match_found": True,
@@ -152,5 +165,6 @@ async def search_uploaded_pdb(
         "metric_distance": float(best_distance),
         "ai_score": float(top_match["ai_binding_score"]),
         "alphamissense_warning": is_hotspot,
-        "message": "Pipeline Success. Top Match verified via VP-Tree."
+        "message": "Pipeline Success. Top Match verified via VP-Tree.",
+        "pharmacology": pharma_data
     }

@@ -2,6 +2,7 @@ from fastapi import FastAPI, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from Bio.PDB import PDBParser # <-- NEW IMPORT
+from scipy.spatial import ConvexHull
 import numpy as np
 import pickle
 import os
@@ -9,6 +10,7 @@ import hashlib
 import glob # <-- NEW IMPORT
 import shutil # <-- NEW IMPORT
 import json
+import math
 
 clinical_dict_path = "data/clinical_context.json"
 with open(clinical_dict_path, "r") as f:
@@ -60,6 +62,31 @@ pdb_reader = PDBParser(QUIET=True) # Used to count atoms dynamically
 
 print(f"--- SPIRE ONLINE: {db_package['indexed_count']} Pockets Indexed ---")
 print("=========================================")
+
+def calculate_druggability_score(coords):
+    """
+    Uses 3D Convex Hull to calculate pocket volume.
+    Ideal druggable pockets are between 300 and 800 Å³.
+    """
+    try:
+        # A 3D Convex Hull requires at least 4 non-coplanar points
+        if len(coords) < 4:
+            return 0.15 
+            
+        hull = ConvexHull(coords)
+        volume = hull.volume
+        
+        # We use a Gaussian bell curve to score the volume.
+        # Peak score (1.0) is at 500 Å³, dropping off as it gets too small or too large.
+        optimal_vol = 500.0
+        variance = 300.0
+        score = math.exp(-0.5 * ((volume - optimal_vol) / variance) ** 2)
+        
+        # Clamp between 0.05 and 0.98 for realistic UI display
+        return max(0.05, min(0.98, float(score)))
+    except Exception as e:
+        print(f"Convex Hull error: {e}")
+        return 0.45 # Fallback score
 
 @app.post("/upload_search")
 async def search_uploaded_pdb(
@@ -157,6 +184,9 @@ async def search_uploaded_pdb(
         "clinical_target": "N/A",
         "side_effects": "Unknown"
     })
+    
+    matched_coords = pocket_coords_db[best_candidate_id]
+    druggability_index = calculate_druggability_score(matched_coords)
 
     return {
         "match_found": True,

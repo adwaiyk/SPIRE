@@ -4,10 +4,13 @@ from fastapi.staticfiles import StaticFiles
 from Bio.PDB import PDBParser
 from scipy.spatial import ConvexHull
 from Bio.SVDSuperimposer import SVDSuperimposer
+from groq import Groq
+import os
+from dotenv import load_dotenv
+load_dotenv()
 import urllib.request
 import numpy as np
 import pickle
-import os
 import hashlib
 import glob 
 import shutil 
@@ -233,6 +236,43 @@ async def search_uploaded_pdb(
         print(f"[WARNING] Local pLDDT calculation failed: {e}")
         pocket_plddt = 85.5 
 
+# --- AGENTIC INTELLIGENCE WORKFLOW (GROQ) ---
+    agentic_report = "Groq API Key missing. Please set the GROQ_API_KEY environment variable to generate the autonomous clinical report."
+    
+    groq_api_key = os.environ.get("GROQ_API_KEY")
+    if groq_api_key:
+        try:
+            client = Groq(api_key=groq_api_key)
+            
+            # The System Prompt: Injecting our strict mathematical data
+            prompt = f"""
+            You are an autonomous Senior Structural Bioinformatician system. 
+            Write a concise, highly professional 'Clinical Target Justification Report' (max 3 paragraphs) for a researcher.
+            
+            Here is the empirical data from the SPIRE spatial search engine:
+            - Target Protein: {pharma_data['protein_name']} (Primarily found in {pharma_data['primary_tissue']})
+            - RMSD Alignment: {rmsd_value:.2f} Å
+            - Druggability Index: {(druggability_index * 100):.1f}/100
+            - Target Rigidity (pLDDT): {pocket_plddt:.1f}/100
+            - Clinical Application: {pharma_data['clinical_target']}
+            - Known Side Effects: {pharma_data['side_effects']}
+            
+            Based strictly on these numbers, analyze if this is a viable drug target. Be analytical, clinical, and objective. 
+            Do not use greetings or pleasantries. Start immediately with the analysis.
+            """
+            
+            # We use Llama 3 on Groq for blazing fast reasoning
+            chat_completion = client.chat.completions.create(
+                messages=[{"role": "user", "content": prompt}],
+                model="llama-3.3-70b-versatile", 
+                temperature=0.2, # Low temperature for clinical accuracy
+                max_tokens=300
+            )
+            agentic_report = chat_completion.choices[0].message.content
+        except Exception as e:
+            print(f"[WARNING] Groq Agent Failed: {e}")
+            agentic_report = "Autonomous Agent encountered an error during generation."
+
     # --- FINAL RETURN PAYLOAD ---
     return {
         "match_found": True,
@@ -242,9 +282,10 @@ async def search_uploaded_pdb(
         "rmsd_alignment": float(rmsd_value),
         "druggability_score": float(druggability_index),
         "ai_score": float(top_match["ai_binding_score"]),
-        "pocket_plddt": float(pocket_plddt),  # Ensure this is included
-        "af_api_status": af_api_status,       # Ensure this is included
+        "pocket_plddt": float(pocket_plddt), 
+        "af_api_status": af_api_status, 
         "alphamissense_warning": is_hotspot,
         "message": "Pipeline Success. Top Match verified via VP-Tree.",
-        "pharmacology": pharma_data
+        "pharmacology": pharma_data,
+        "clinical_report": agentic_report # <-- THE NEW AGENT REPORT
     }

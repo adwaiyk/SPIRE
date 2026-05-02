@@ -2,8 +2,8 @@ import os
 import pickle
 import numpy as np
 import sys
-import urllib.request
-import json
+import glob 
+import shutil # <-- NEW IMPORT for file copying
 
 # Add the parent directory to the path so we can import our core modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -12,24 +12,26 @@ from core.bloom_filter import ChemicalBloomFilter
 from core.vp_tree import VPTree
 from data.pdb_parser import AlphaFoldParser
 
-def fetch_top_100_human_proteins():
-    """Dynamically fetches the top 100 reviewed Human Protein IDs from UniProt."""
-    print("[INFO] Fetching 100 Human Protein IDs from UniProt API...")
-    url = "https://rest.uniprot.org/uniprotkb/search?query=(reviewed:true)%20AND%20(organism_id:9606)&size=100&fields=accession"
-    try:
-        req = urllib.request.Request(url, headers={'User-Agent': 'Python/SPIRE'})
-        with urllib.request.urlopen(req) as response:
-            data = json.loads(response.read().decode())
-            # Extract just the IDs (e.g., 'P04637')
-            return [result['primaryAccession'] for result in data['results']]
-    except Exception as e:
-        print(f"[ERROR] Failed to fetch from UniProt: {e}")
-        # Fallback list just in case you have no wifi during your demo
-        return ["P04637", "P02144", "P00734", "P15056", "P01112", "P35968"]
+def fetch_local_proteins():
+    """Scans the local data/raw directory for all downloaded protein files."""
+    print("[INFO] Scanning local data/raw folder for existing proteins...")
+    
+    pdb_files = glob.glob("data/raw/*.pdb")
+    local_ids = []
+    
+    for file_path in pdb_files:
+        filename = os.path.basename(file_path)
+        if "temp" not in filename and "pocket" not in filename:
+            pid = filename.replace("_CLEAN.pdb", "").replace("_AF.pdb", "").replace(".pdb", "")
+            local_ids.append(pid)
+            
+    unique_ids = list(set(local_ids))
+    print(f"[INFO] Found {len(unique_ids)} unique local proteins to index.")
+    return unique_ids
 
 def build_spire_database():
     print("=========================================")
-    print("   SPIRE OFFLINE INDEX BUILDER v1.0      ")
+    print("   SPIRE DEEP OFFLINE INDEX BUILDER v2.0 ")
     print("=========================================")
 
     af_parser = AlphaFoldParser()
@@ -39,12 +41,16 @@ def build_spire_database():
     pocket_filter.add("HYDROPHOBIC")
     pocket_filter.add("KINASE_LIKE")
 
-    # Fetch our 100 target proteins
-    database_ids = fetch_top_100_human_proteins()
+    # Fetch our local proteins
+    database_ids = fetch_local_proteins()
     
     db_points = []
     pocket_coords_db = {}
     successful_ids = []
+
+    # --- NEW: Create the Important Proteins directory ---
+    imp_folder = "imp_proteins"
+    os.makedirs(imp_folder, exist_ok=True)
 
     print(f"\n[INFO] Starting batch processing of {len(database_ids)} AlphaFold structures...")
     print("[INFO] This will take a few minutes as fpocket calculates the 3D Voronoi cavities.\n")
@@ -52,25 +58,55 @@ def build_spire_database():
     for idx, pid in enumerate(database_ids):
         print(f"Processing [{idx+1}/{len(database_ids)}]: {pid}")
         
-        raw_file = af_parser.fetch_alphafold_structure(pid)
-        if not raw_file:
+        # We assume the file is already local since we fetched local IDs
+        # So we just construct the path to the clean file
+        clean_file = f"data/raw/{pid}_CLEAN.pdb"
+        
+        # Fallback if the clean file doesn't exist but the raw one does
+        if not os.path.exists(clean_file):
+            raw_file = f"data/raw/{pid}.pdb"
+            if os.path.exists(raw_file):
+                clean_file = af_parser.filter_by_plddt(raw_file, pid)
+            else:
+                print(f"  -> [SKIP] File for {pid} not found.")
+                continue
+        
+        # Run fpocket 
+        _ = af_parser.run_fpocket(clean_file)
+        
+        # Look for every pocket file fpocket just generated
+        pocket_files = glob.glob(f"data/raw/{pid}_CLEAN_out/pockets/pocket*_atm.pdb")
+        
+        if not pocket_files:
+            print(f"  -> [SKIP] No distinct pockets found by fpocket.")
             continue
             
-        clean_file = af_parser.filter_by_plddt(raw_file, pid)
-        coords = af_parser.run_fpocket(clean_file)
-        
-        # Skip proteins that are too flat to have a real pocket
-        if len(coords) < 10:
-            print(f"  -> [SKIP] No distinct pocket found.")
-            continue
+        valid_pocket_found_for_protein = False
             
-        vec = af_parser.generate_vp_feature_vector(coords)
-        
-        db_points.append(vec)
-        pocket_coords_db[pid] = coords
-        successful_ids.append(pid)
-        
-        print(f"  -> [SUCCESS] PCA Vector: [{vec[0]:.1f}, {vec[1]:.1f}, {vec[2]:.1f}]")
+        for p_file in pocket_files:
+            pocket_name = os.path.basename(p_file).replace("_atm.pdb", "")
+            coords = af_parser._extract_coords(p_file, "index")
+            
+            if len(coords) < 10:
+                continue 
+                
+            valid_pocket_found_for_protein = True
+            vec = af_parser.generate_vp_feature_vector(coords)
+            
+            full_id = f"{pid}::{pocket_name}"
+            db_points.append(vec)
+            pocket_coords_db[full_id] = coords
+            successful_ids.append(full_id)
+            
+            print(f"  -> [INDEXED] {full_id} | PCA Vector: [{vec[0]:.1f}, {vec[1]:.1f}, {vec[2]:.1f}]")
+
+        # --- NEW: Copy to imp_proteins if at least one valid pocket was indexed ---
+        if valid_pocket_found_for_protein:
+            dest_file = os.path.join(imp_folder, f"{pid}_CLEAN.pdb")
+            # Only copy if it hasn't been copied already
+            if not os.path.exists(dest_file):
+                shutil.copy2(clean_file, dest_file)
+                print(f"  -> [SAVED] {pid}_CLEAN.pdb copied to {imp_folder}/")
 
     print("\n=========================================")
     print("[INFO] Building Data Structures...")
@@ -91,7 +127,8 @@ def build_spire_database():
         pickle.dump(db_package, f)
 
     print(f"\n[SUCCESS] SPIRE Database built!")
-    print(f"Successfully extracted deep pockets from {len(successful_ids)} out of {len(database_ids)} proteins.")
+    print(f"Successfully extracted and indexed {len(successful_ids)} individual pockets.")
+    print(f"Successfully verified proteins copied to '{imp_folder}/'")
     print("Saved to 'data/index/spire_master.pkl'")
     print("=========================================")
 

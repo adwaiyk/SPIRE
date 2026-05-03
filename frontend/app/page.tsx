@@ -219,11 +219,36 @@ export default function Home() {
                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">RMSD Alignment</p>
                 <p className="text-2xl font-light text-indigo-600">{result.rmsd_alignment?.toFixed(2)} <span className="text-sm font-normal text-slate-400">Å</span></p>
               </div>
-              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-center relative overflow-hidden">
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 relative z-10">GNN Binding Affinity</p>
-                <p className="text-2xl font-bold text-emerald-600 relative z-10">{(result.ai_score * 100)?.toFixed(2)}%</p>
-                <div className="absolute right-0 bottom-0 opacity-10">
-                  <svg className="w-24 h-24 text-emerald-500 -mr-6 -mb-6" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
+              <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm flex flex-col justify-between relative overflow-hidden group">
+                <div>
+                  <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1 relative z-10">GNN Binding Affinity</p>
+                  <div className="flex items-baseline gap-2 relative z-10">
+                    <p className="text-3xl font-bold text-emerald-600">{(result.ai_score * 100)?.toFixed(2)}%</p>
+                    {/* Add a dynamic confidence badge based on the score */}
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-bold uppercase ${result.ai_score > 0.7 ? 'bg-emerald-100 text-emerald-700' : result.ai_score > 0.4 ? 'bg-amber-100 text-amber-700' : 'bg-rose-100 text-rose-700'}`}>
+                      {result.ai_score > 0.7 ? 'High' : result.ai_score > 0.4 ? 'Moderate' : 'Low'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* GRAPH TOPOLOGY METRICS (EXPLAINABLE AI) */}
+                <div className="mt-4 pt-3 border-t border-slate-100 relative z-10">
+                  <p className="text-[8px] text-slate-400 uppercase font-bold mb-1.5">Graph Topology</p>
+                  <div className="flex gap-3">
+                    <div className="flex items-center gap-1">
+                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13.828 10.172a4 4 0 00-5.656 0l-4 4a4 4 0 105.656 5.656l1.102-1.101m-.758-4.899a4 4 0 005.656 0l4-4a4 4 0 00-5.656-5.656l-1.1 1.1"></path></svg>
+                      <span className="text-xs font-mono text-slate-600">{result.graph_nodes || 0} Nodes</span>
+                    </div>
+                    <div className="flex items-center gap-1">
+                      <svg className="w-3 h-3 text-slate-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                      <span className="text-xs font-mono text-slate-600">{result.graph_edges || 0} Edges</span>
+                    </div>
+                  </div>
+                </div>
+
+                {/* Background decorative graphic */}
+                <div className="absolute right-0 bottom-0 opacity-[0.03] transition-opacity duration-500 group-hover:opacity-[0.08]">
+                  <svg className="w-32 h-32 -mr-8 -mb-8" fill="currentColor" viewBox="0 0 24 24"><path d="M12 2L2 7l10 5 10-5-10-5zM2 17l10 5 10-5M2 12l10 5 10-5"></path></svg>
                 </div>
               </div>
             </div>

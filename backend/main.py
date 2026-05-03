@@ -309,6 +309,8 @@ async def search_uploaded_pdb(
         "rmsd_alignment": float(rmsd_value),
         "druggability_score": float(druggability_index),
         "ai_score": original_ai_score,
+        "graph_nodes": top_match.get("graph_nodes", 0), 
+        "graph_edges": top_match.get("graph_edges", 0),
         "mutated_ai_score": mutated_ai_score, 
         "affinity_drop": affinity_drop,       
         "pocket_plddt": float(pocket_plddt), 

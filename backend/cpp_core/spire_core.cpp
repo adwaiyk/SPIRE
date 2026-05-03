@@ -3,6 +3,7 @@
 #include "bloom_filter.hpp"
 #include "geo_hash.hpp"
 #include "vp_tree.hpp"
+#include "motif_trie.hpp"
 
 namespace py = pybind11;
 
@@ -43,4 +44,9 @@ PYBIND11_MODULE(spire_core, m) {
                 return VPTree(t[0].cast<std::vector<std::pair<std::string, std::vector<double>>>>());
             }
         ));
+
+        py::class_<MotifTrie>(m, "MotifTrie")
+        .def(py::init<>())
+        .def("insert_sequence", &MotifTrie::insert_sequence, "Index a 1D protein sequence")
+        .def("search_motif", &MotifTrie::search_motif, "O(m) motif search");
 }

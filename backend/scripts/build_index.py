@@ -5,6 +5,13 @@ import numpy as np
 import glob 
 import shutil
 
+AMINO_ACID_MAP = {
+    'CYS': 'C', 'ASP': 'D', 'SER': 'S', 'GLN': 'Q', 'LYS': 'K',
+    'ILE': 'I', 'PRO': 'P', 'THR': 'T', 'PHE': 'F', 'ASN': 'N',
+    'GLY': 'G', 'HIS': 'H', 'LEU': 'L', 'ARG': 'R', 'TRP': 'W',
+    'ALA': 'A', 'VAL': 'V', 'GLU': 'E', 'TYR': 'Y', 'MET': 'M'
+}
+
 # Add the parent directory to the path so we can import our core modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -51,6 +58,7 @@ def build_spire_database():
     
     db_points = []
     pocket_coords_db = {}
+    sequence_db = {}
     successful_ids = []
 
     # --- Create the Important Proteins directory ---
@@ -75,7 +83,26 @@ def build_spire_database():
                 print(f"  -> [SKIP] File for {pid} not found.")
                 continue
         
-        # Run fpocket 
+        current_protein_sequence = ""
+        try:
+            with open(clean_file, 'r') as f:
+                last_res = None
+                for line in f:
+                    if line.startswith("ATOM"):
+                        res_name = line[17:20].strip() # Extract 3-letter code
+                        res_num = line[22:26].strip()  # Extract residue ID
+                        if res_num != last_res:
+                            if res_name in AMINO_ACID_MAP:
+                                current_protein_sequence += AMINO_ACID_MAP[res_name]
+                            last_res = res_num
+        except Exception as e:
+            print(f"  -> [WARN] Sequence extraction failed for {pid}: {e}")
+            
+        # Absolute fallback just in case the file was empty
+        if not current_protein_sequence:
+            current_protein_sequence = "MKTAY"
+
+        # --- 2. RUN FPOCKET ---
         _ = af_parser.run_fpocket(clean_file)
         
         # Look for every pocket file fpocket just generated
@@ -98,6 +125,9 @@ def build_spire_database():
             vec = af_parser.generate_vp_feature_vector(coords)
             
             full_id = f"{pid}::{pocket_name}"
+            
+            # Map the parsed sequence to this pocket ID for the Trie
+            sequence_db[full_id] = current_protein_sequence
             
             # Store data to build the Python VP-Tree later
             db_points.append(vec)
@@ -131,7 +161,8 @@ def build_spire_database():
         "geo_hash": geo_hash,
         "bloom_filter": pocket_filter,
         "raw_coords": pocket_coords_db,
-        "indexed_count": len(successful_ids)
+        "indexed_count": len(successful_ids),
+        "sequences": sequence_db,
     }
 
     with open("data/index/spire_master.pkl", "wb") as f:

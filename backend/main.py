@@ -5,9 +5,8 @@ from Bio.PDB import PDBParser
 from scipy.spatial import ConvexHull
 from Bio.SVDSuperimposer import SVDSuperimposer
 from groq import Groq
-import os
 from dotenv import load_dotenv
-load_dotenv()
+import os
 import urllib.request
 import numpy as np
 import pickle
@@ -16,6 +15,8 @@ import glob
 import shutil 
 import json
 import math
+
+load_dotenv()
 
 # Load the Pharmacological Dictionary
 clinical_dict_path = "data/clinical_context.json"
@@ -26,6 +27,7 @@ with open(clinical_dict_path, "r") as f:
 from core.bloom_filter import ChemicalBloomFilter
 from core.geo_hash import GeometricHashTable
 from core.vp_tree import VPTree
+from core.motif_trie import MotifTrie
 from ml.gnn_ranker import AIRanker
 from data.pdb_parser import AlphaFoldParser
 
@@ -56,8 +58,16 @@ with open(index_path, "rb") as f:
 vp_tree = db_package["vp_tree"]
 pocket_filter = db_package["bloom_filter"]
 pocket_coords_db = db_package["raw_coords"]
+sequence_db = db_package.get("sequences", {})
 
-# If your original Python GeoHash did not take bin_size, remove it here
+print(f"[INFO] Reconstructing Suffix Trie in RAM with {len(sequence_db)} sequences...")
+
+motif_trie = MotifTrie()
+for pid, seq in sequence_db.items():
+    if seq:
+        motif_trie.insert_sequence(pid, seq)
+print("[INFO] Suffix Trie Online.")
+
 geo_hash = GeometricHashTable() 
 for pid_pocket, coords in pocket_coords_db.items():
     centered = coords - np.mean(coords, axis=0)
@@ -93,6 +103,16 @@ def calculate_druggability_score(coords):
     except Exception as e:
         print(f"Convex Hull error: {e}")
         return 0.45 
+    
+@app.get("/search_motif")
+async def search_motif(motif: str):
+    """O(m) Suffix Trie Search for Genetic Motifs"""
+    motif = motif.upper()
+    matches = motif_trie.search_motif(motif)
+    
+    # Return unique base proteins (ignoring specific pockets)
+    unique_proteins = list(set([m.split("::")[0] for m in matches]))
+    return {"motif": motif, "match_count": len(unique_proteins), "proteins": unique_proteins[:10]}
 
 @app.post("/upload_search")
 async def search_uploaded_pdb(
@@ -190,16 +210,13 @@ async def search_uploaded_pdb(
     original_ai_score = float(top_match["ai_binding_score"])
     
     # --- CAUSAL MUTATION SIMULATOR (COUNTERFACTUAL ANALYSIS) ---
-    # We apply a Gaussian noise perturbation (Mean=0, StdDev=0.5 Å) to simulate a structural mutation
     noise = np.random.normal(0, 0.5, matched_coords.shape)
     mutated_coords = matched_coords + noise
     
-    # Re-run the GNN Affinity Judge on the mutated structure
     mutated_candidate = [{"id": best_candidate_id, "coords": mutated_coords}]
     mutated_results = ai_ranker.rank_pockets(mutated_candidate)
     mutated_ai_score = float(mutated_results[0]["ai_binding_score"])
     
-    # Calculate the Delta (How much did the mutation ruin the drug's fit?)
     affinity_drop = original_ai_score - mutated_ai_score
 
     # --- ID FORMATTING & METADATA ---
@@ -221,7 +238,6 @@ async def search_uploaded_pdb(
     })
     
     # --- ALPHAFOLD STRUCTURAL VIABILITY MATRIX ---
-    # 1. Hit the Live AlphaFold API for verification
     af_api_status = "Offline"
     try:
         url = f"https://alphafold.ebi.ac.uk/api/prediction/{real_protein_id}"
@@ -233,20 +249,16 @@ async def search_uploaded_pdb(
         print(f"[WARNING] AlphaFold API Ping failed: {e}")
         af_api_status = "Local Database"
 
-    # 2. Calculate Localized Pocket pLDDT (Rigidity) via Biopython B-factors
     pocket_plddt = 0.0
     try:
-        # THE FIX: fpocket strips pLDDT scores. We MUST read from the original AlphaFold file!
         orig_file = f"data/raw/{real_protein_id}_CLEAN.pdb"
         
         if os.path.exists(orig_file):
             p_struct = pdb_reader.get_structure("orig", orig_file)
-            # Extract all valid AlphaFold B-factors (ignoring the 0.0s)
             b_factors = [atom.get_bfactor() for atom in p_struct.get_atoms() if atom.get_bfactor() > 0.1]
             if b_factors:
                 pocket_plddt = sum(b_factors) / len(b_factors)
                 
-        # Safe fallback just in case the clean file doesn't exist
         if pocket_plddt < 10.0:
             pocket_plddt = 88.4 
 
@@ -262,7 +274,6 @@ async def search_uploaded_pdb(
         try:
             client = Groq(api_key=groq_api_key)
             
-            # The System Prompt: Injecting our strict mathematical data
             prompt = f"""
             You are an autonomous Senior Structural Bioinformatician system. 
             Write a concise, highly professional 'Clinical Target Justification Report' (max 3 paragraphs) for a researcher.
@@ -279,11 +290,10 @@ async def search_uploaded_pdb(
             Do not use greetings or pleasantries. Start immediately with the analysis.
             """
             
-            # We use Llama 3 on Groq for blazing fast reasoning
             chat_completion = client.chat.completions.create(
                 messages=[{"role": "user", "content": prompt}],
                 model="llama-3.3-70b-versatile", 
-                temperature=0.2, # Low temperature for clinical accuracy
+                temperature=0.2,
                 max_tokens=300
             )
             agentic_report = chat_completion.choices[0].message.content

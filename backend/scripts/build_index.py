@@ -101,6 +101,8 @@ def build_spire_database():
         # Absolute fallback just in case the file was empty
         if not current_protein_sequence:
             current_protein_sequence = "MKTAY"
+            
+        sequence_db[pid] = current_protein_sequence
 
         # --- 2. RUN FPOCKET ---
         _ = af_parser.run_fpocket(clean_file)
@@ -127,7 +129,7 @@ def build_spire_database():
             full_id = f"{pid}::{pocket_name}"
             
             # Map the parsed sequence to this pocket ID for the Trie
-            sequence_db[full_id] = current_protein_sequence
+            # sequence_db[full_id] = current_protein_sequence
             
             # Store data to build the Python VP-Tree later
             db_points.append(vec)

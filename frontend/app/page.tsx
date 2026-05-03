@@ -125,7 +125,7 @@ export default function Home() {
               onClick={handleMotifSearch}
               className="bg-indigo-100 hover:bg-indigo-200 text-indigo-700 font-bold py-2 px-6 rounded-md transition-colors text-xs uppercase tracking-wider"
             >
-              Query Trie
+              Search
             </button>
           </div>
           

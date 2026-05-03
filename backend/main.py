@@ -179,11 +179,26 @@ async def search_uploaded_pdb(
     # --- POCKDRUG DRUGGABILITY CALCULATION ---
     druggability_index = calculate_druggability_score(matched_coords)
 
-    # --- GNN RANKING ---
+# --- GNN RANKING ---
     candidate_data = [{"id": best_candidate_id, "coords": matched_coords}]
     ranked_results = ai_ranker.rank_pockets(candidate_data)
     top_match = ranked_results[0]
+    original_ai_score = float(top_match["ai_binding_score"])
     
+    # --- CAUSAL MUTATION SIMULATOR (COUNTERFACTUAL ANALYSIS) ---
+    # We apply a Gaussian noise perturbation (Mean=0, StdDev=0.5 Å) to simulate a structural mutation
+    noise = np.random.normal(0, 0.5, matched_coords.shape)
+    mutated_coords = matched_coords + noise
+    
+    # Re-run the GNN Affinity Judge on the mutated structure
+    mutated_candidate = [{"id": best_candidate_id, "coords": mutated_coords}]
+    mutated_results = ai_ranker.rank_pockets(mutated_candidate)
+    mutated_ai_score = float(mutated_results[0]["ai_binding_score"])
+    
+    # Calculate the Delta (How much did the mutation ruin the drug's fit?)
+    affinity_drop = original_ai_score - mutated_ai_score
+
+    # --- ID FORMATTING & METADATA ---
     full_id_string = top_match["id"]
     if "::" in full_id_string:
         real_protein_id, specific_pocket = full_id_string.split("::")
@@ -273,7 +288,6 @@ async def search_uploaded_pdb(
             print(f"[WARNING] Groq Agent Failed: {e}")
             agentic_report = "Autonomous Agent encountered an error during generation."
 
-    # --- FINAL RETURN PAYLOAD ---
     return {
         "match_found": True,
         "protein_id": real_protein_id,
@@ -281,11 +295,13 @@ async def search_uploaded_pdb(
         "metric_distance": float(best_distance),
         "rmsd_alignment": float(rmsd_value),
         "druggability_score": float(druggability_index),
-        "ai_score": float(top_match["ai_binding_score"]),
+        "ai_score": original_ai_score,
+        "mutated_ai_score": mutated_ai_score, # <-- NEW DATA
+        "affinity_drop": affinity_drop,       # <-- NEW DATA
         "pocket_plddt": float(pocket_plddt), 
         "af_api_status": af_api_status, 
         "alphamissense_warning": is_hotspot,
         "message": "Pipeline Success. Top Match verified via VP-Tree.",
         "pharmacology": pharma_data,
-        "clinical_report": agentic_report # <-- THE NEW AGENT REPORT
+        "clinical_report": agentic_report
     }

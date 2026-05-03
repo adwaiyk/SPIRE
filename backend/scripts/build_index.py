@@ -1,14 +1,14 @@
+import sys
 import os
 import pickle
 import numpy as np
-import sys
 import glob 
 import shutil # <-- NEW IMPORT for file copying
 
 # Add the parent directory to the path so we can import our core modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from core.bloom_filter import ChemicalBloomFilter
+from spire_core import BloomFilter
 from core.vp_tree import VPTree
 from data.pdb_parser import AlphaFoldParser
 
@@ -35,7 +35,7 @@ def build_spire_database():
     print("=========================================")
 
     af_parser = AlphaFoldParser()
-    pocket_filter = ChemicalBloomFilter(expected_items=10000, false_positive_rate=0.01)
+    pocket_filter = BloomFilter(size=95850, num_hashes=7)
     
     pocket_filter.add("HAS_SULPHUR")
     pocket_filter.add("HYDROPHOBIC")

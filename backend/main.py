@@ -22,7 +22,10 @@ clinical_dict_path = "data/clinical_context.json"
 with open(clinical_dict_path, "r") as f:
     clinical_context_db = json.load(f)
 
+from spire_core import BloomFilter, GeometricHashTable, VPTree
+from core.bloom_filter import ChemicalBloomFilter
 from core.geo_hash import GeometricHashTable
+from core.vp_tree import VPTree
 from ml.gnn_ranker import AIRanker
 from data.pdb_parser import AlphaFoldParser
 

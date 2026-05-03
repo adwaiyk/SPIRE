@@ -123,3 +123,28 @@ SPIRE uses a **coarse-to-fine retrieval pipeline**:
 git clone https://github.com/yourusername/SPIRE.git
 cd SPIRE/backend
 pip install -r requirements.txt
+
+Create .env file:
+
+GROQ_API_KEY=your_groq_api_key_here
+
+Build index:
+
+```bash
+python scripts/build_index.py
+
+Run backend:
+
+```bash
+uvicorn main:app --reload --port 8000
+
+2. Frontend Setup
+
+```bash
+cd SPIRE/frontend
+npm install
+npm run dev
+
+App runs at:
+
+http://localhost:3000

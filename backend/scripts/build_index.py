@@ -8,8 +8,10 @@ import shutil
 # Add the parent directory to the path so we can import our core modules
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-# ONLY import the high-speed C++ classes!
-from spire_core import BloomFilter, GeometricHashTable, VPTree
+# ONLY import the original Python classes
+from core.bloom_filter import ChemicalBloomFilter
+from core.geo_hash import GeometricHashTable
+from core.vp_tree import VPTree
 from data.pdb_parser import AlphaFoldParser
 
 def fetch_local_proteins():
@@ -36,10 +38,9 @@ def build_spire_database():
 
     af_parser = AlphaFoldParser()
     
-    # --- INITIALIZE C++ NATIVE DATA STRUCTURES ---
-    pocket_filter = BloomFilter(size=95850, num_hashes=7)
-    geo_hash = GeometricHashTable(bin_size=20.0)
-    vp_tree = VPTree()
+    # --- INITIALIZE PYTHON DATA STRUCTURES ---
+    pocket_filter = ChemicalBloomFilter(expected_items=10000, false_positive_rate=0.01)
+    geo_hash = GeometricHashTable() 
     
     pocket_filter.add("HAS_SULPHUR")
     pocket_filter.add("HYDROPHOBIC")
@@ -48,6 +49,7 @@ def build_spire_database():
     # Fetch our local proteins
     database_ids = fetch_local_proteins()
     
+    db_points = []
     pocket_coords_db = {}
     successful_ids = []
 
@@ -96,19 +98,20 @@ def build_spire_database():
             vec = af_parser.generate_vp_feature_vector(coords)
             
             full_id = f"{pid}::{pocket_name}"
+            
+            # Store data to build the Python VP-Tree later
+            db_points.append(vec)
             pocket_coords_db[full_id] = coords
             successful_ids.append(full_id)
             
-            # --- PUSH DATA TO C++ STRUCTURES ---
+            # Insert into Python GeoHash
             geo_hash.insert(full_id, vec)
-            vp_tree.add(full_id, vec)
             
             print(f"  -> [INDEXED] {full_id} | PCA Vector: [{vec[0]:.1f}, {vec[1]:.1f}, {vec[2]:.1f}]")
 
         # --- Copy to imp_proteins if at least one valid pocket was indexed ---
         if valid_pocket_found_for_protein:
             dest_file = os.path.join(imp_folder, f"{pid}_CLEAN.pdb")
-            # Only copy if it hasn't been copied already
             if not os.path.exists(dest_file):
                 shutil.copy2(clean_file, dest_file)
                 print(f"  -> [SAVED] {pid}_CLEAN.pdb copied to {imp_folder}/")
@@ -116,9 +119,9 @@ def build_spire_database():
     print("\n=========================================")
     print("[INFO] Building Data Structures...")
     
-    # --- LOCK AND COMPILE THE C++ VP-TREE ---
-    print("[INFO] Compiling native C++ VP-Tree in memory...")
-    vp_tree.build()
+    # --- BUILD THE PYTHON VP-TREE ---
+    print("[INFO] Building Python VP-Tree...")
+    vp_tree = VPTree(np.array(db_points), successful_ids)
 
     print("[INFO] Saving SPIRE Database to disk...")
     os.makedirs("data/index", exist_ok=True)

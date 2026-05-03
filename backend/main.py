@@ -22,7 +22,7 @@ clinical_dict_path = "data/clinical_context.json"
 with open(clinical_dict_path, "r") as f:
     clinical_context_db = json.load(f)
 
-from spire_core import BloomFilter, GeometricHashTable, VPTree
+# ONLY import the original Python classes
 from core.bloom_filter import ChemicalBloomFilter
 from core.geo_hash import GeometricHashTable
 from core.vp_tree import VPTree
@@ -57,7 +57,8 @@ vp_tree = db_package["vp_tree"]
 pocket_filter = db_package["bloom_filter"]
 pocket_coords_db = db_package["raw_coords"]
 
-geo_hash = GeometricHashTable(bin_size=20.0)
+# If your original Python GeoHash did not take bin_size, remove it here
+geo_hash = GeometricHashTable() 
 for pid_pocket, coords in pocket_coords_db.items():
     centered = coords - np.mean(coords, axis=0)
     cov_matrix = np.cov(centered, rowvar=False)
@@ -182,7 +183,7 @@ async def search_uploaded_pdb(
     # --- POCKDRUG DRUGGABILITY CALCULATION ---
     druggability_index = calculate_druggability_score(matched_coords)
 
-# --- GNN RANKING ---
+    # --- GNN RANKING ---
     candidate_data = [{"id": best_candidate_id, "coords": matched_coords}]
     ranked_results = ai_ranker.rank_pockets(candidate_data)
     top_match = ranked_results[0]
@@ -219,8 +220,7 @@ async def search_uploaded_pdb(
         "side_effects": "Unknown"
     })
     
-# --- ALPHAFOLD STRUCTURAL VIABILITY MATRIX ---
-    
+    # --- ALPHAFOLD STRUCTURAL VIABILITY MATRIX ---
     # 1. Hit the Live AlphaFold API for verification
     af_api_status = "Offline"
     try:
@@ -254,7 +254,7 @@ async def search_uploaded_pdb(
         print(f"[WARNING] Local pLDDT calculation failed: {e}")
         pocket_plddt = 85.5 
 
-# --- AGENTIC INTELLIGENCE WORKFLOW (GROQ) ---
+    # --- AGENTIC INTELLIGENCE WORKFLOW (GROQ) ---
     agentic_report = "Groq API Key missing. Please set the GROQ_API_KEY environment variable to generate the autonomous clinical report."
     
     groq_api_key = os.environ.get("GROQ_API_KEY")
@@ -299,8 +299,8 @@ async def search_uploaded_pdb(
         "rmsd_alignment": float(rmsd_value),
         "druggability_score": float(druggability_index),
         "ai_score": original_ai_score,
-        "mutated_ai_score": mutated_ai_score, # <-- NEW DATA
-        "affinity_drop": affinity_drop,       # <-- NEW DATA
+        "mutated_ai_score": mutated_ai_score, 
+        "affinity_drop": affinity_drop,       
         "pocket_plddt": float(pocket_plddt), 
         "af_api_status": af_api_status, 
         "alphamissense_warning": is_hotspot,

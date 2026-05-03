@@ -1,9 +1,9 @@
 # 🧬 SPIRE: Spatial Protein Indexing & Retrieval Engine
 
-![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)
-![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)
-![PyTorch](https://img.shields.io/badge/PyTorch-Geometric-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)
-![Next.js](https://img.shields.io/badge/Next.js-React-black?style=for-the-badge&logo=next.js&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-blue?style=for-the-badge&logo=python&logoColor=white)  
+![FastAPI](https://img.shields.io/badge/FastAPI-0.100%2B-009688?style=for-the-badge&logo=fastapi&logoColor=white)  
+![PyTorch](https://img.shields.io/badge/PyTorch-Geometric-EE4C2C?style=for-the-badge&logo=pytorch&logoColor=white)  
+![Next.js](https://img.shields.io/badge/Next.js-React-black?style=for-the-badge&logo=next.js&logoColor=white)  
 ![AI](https://img.shields.io/badge/AI_Agent-LLaMA_3.3-purple?style=for-the-badge)
 
 ---
@@ -90,9 +90,9 @@ SPIRE uses a **coarse-to-fine retrieval pipeline**:
 ## 💻 Tech Stack
 
 ### Core Engineering
-- Python 3.10+
-- C++ (via pybind11)
-- FastAPI
+- Python 3.10+  
+- C++ (via pybind11)  
+- FastAPI  
 
 ### Machine Learning & Bioinformatics
 - PyTorch & PyTorch Geometric  
@@ -111,8 +111,8 @@ SPIRE uses a **coarse-to-fine retrieval pipeline**:
 ## ⚙️ Installation & Setup
 
 ### Prerequisites
-- Python 3.10+
-- Node.js v18+
+- Python 3.10+  
+- Node.js v18+  
 - `fpocket` installed and available in PATH  
 
 ---
@@ -123,28 +123,3 @@ SPIRE uses a **coarse-to-fine retrieval pipeline**:
 git clone https://github.com/yourusername/SPIRE.git
 cd SPIRE/backend
 pip install -r requirements.txt
-
-Create .env file:
-
-GROQ_API_KEY=your_groq_api_key_here
-
-Build index:
-
-```bash
-python scripts/build_index.py
-
-Run backend:
-
-```bash
-uvicorn main:app --reload --port 8000
-
-2. Frontend Setup
-
-```bash
-cd SPIRE/frontend
-npm install
-npm run dev
-
-App runs at:
-
-http://localhost:3000
